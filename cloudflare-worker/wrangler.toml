@@ -1,0 +1,22 @@
+# Rinovabd v2: completely separate Worker and bindings. Do not replace these IDs with any legacy resource IDs.
+name = "rinovabd-v2-api"
+main = "src/index.mjs"
+compatibility_date = "2026-08-28"
+workers_dev = true
+
+[vars]
+APP_NAME = "Rinovabd v2"
+ALLOWED_ORIGIN = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rinovabd-v2-db"
+database_id = "9a3e6871-3df9-4e7f-8ecc-8b3fcbcefe16"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "3adfac39087040c9ae95b36397ead661"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "rinovabd-v2-media"

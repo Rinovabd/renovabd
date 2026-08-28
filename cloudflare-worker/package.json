@@ -1,0 +1,13 @@
+{
+  "name": "rinovabd-v2-worker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/worker.test.mjs",
+    "typecheck": "node --check src/index.mjs && node --check test/worker.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
