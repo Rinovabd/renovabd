@@ -1,4 +1,5 @@
 /** Ribbon Modernism: structured, candid commerce data with Rinova Pink as the active launch signal. */
+import { cloudflareAssets } from "./cloudflare-assets";
 export type ProductStatus = "Live" | "Draft" | "Low stock";
 
 export type Product = {
@@ -21,7 +22,7 @@ export const productSeed: Product[] = [
     category: "Complexion",
     price: 1290,
     compareAt: 1490,
-    image: "/manus-storage/rinovabd-product-pink-essentials_5fd5096d.png",
+    image: cloudflareAssets.productEssentials,
     shade: "Rose flush",
     stock: 28,
     status: "Live",
@@ -32,7 +33,7 @@ export const productSeed: Product[] = [
     name: "Satin Drop Serum",
     category: "Skin ritual",
     price: 1690,
-    image: "/manus-storage/rinovabd-hero-ritual_f76d3417.png",
+    image: cloudflareAssets.heroRitual,
     shade: "30 ml",
     stock: 42,
     status: "Live",
@@ -43,7 +44,7 @@ export const productSeed: Product[] = [
     name: "Gloss in Pink",
     category: "Lips",
     price: 890,
-    image: "/manus-storage/rinovabd-collection-face_bcb32ab5.png",
+    image: cloudflareAssets.collectionFace,
     shade: "Petal wash",
     stock: 8,
     status: "Low stock",
@@ -54,7 +55,7 @@ export const productSeed: Product[] = [
     name: "The Daily Edit",
     category: "Sets",
     price: 2490,
-    image: "/manus-storage/rinovabd-product-pink-essentials_5fd5096d.png",
+    image: cloudflareAssets.shopEditorialRibbon,
     shade: "Four-piece ritual",
     stock: 16,
     status: "Live",

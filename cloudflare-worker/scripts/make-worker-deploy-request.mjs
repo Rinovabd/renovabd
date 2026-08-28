@@ -17,7 +17,7 @@ const executeCode = `async () => {
       { type: "kv_namespace", name: "CACHE", namespace_id: "3adfac39087040c9ae95b36397ead661" },
       { type: "r2_bucket", name: "MEDIA", bucket_name: "rinovabd-v2-media" },
       { type: "plain_text", name: "APP_NAME", text: "Rinovabd v2" },
-      { type: "plain_text", name: "ALLOWED_ORIGIN", text: "" }
+      { type: "plain_text", name: "ALLOWED_ORIGIN", text: "https://shop-v2.rinovabd.com" }
     ]
   };
   const boundary = "----RinovabdV2" + Date.now();

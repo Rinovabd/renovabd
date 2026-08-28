@@ -19,7 +19,7 @@ function cors(origin, env) {
   return {
     "access-control-allow-origin": permitted ? (configured || origin || "*") : "null",
     "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type, x-admin-session, x-filename",
+    "access-control-allow-headers": "authorization, content-type, x-admin-session, x-filename, x-object-key",
     "access-control-max-age": "86400",
     vary: "Origin",
   };
@@ -171,7 +171,7 @@ async function mediaUpload(request, env) {
   if (length && length > MAX_UPLOAD_BYTES) return error("PAYLOAD_TOO_LARGE", "Images must be 6 MB or smaller.", 413);
   const bytes = await request.arrayBuffer(); if (!bytes.byteLength || bytes.byteLength > MAX_UPLOAD_BYTES) return error("PAYLOAD_TOO_LARGE", "Images must be 6 MB or smaller.", 413);
   const extension = type === "image/jpeg" ? "jpg" : type.split("/")[1];
-  const id = crypto.randomUUID(); const key = `uploads/${new Date().toISOString().slice(0, 10)}/${id}.${extension}`; const originalName = safeText(request.headers.get("x-filename"), 200) || `upload.${extension}`;
+  const id = crypto.randomUUID(); const requestedKey = safeText(request.headers.get("x-object-key"), 320); const validSiteKey = /^site\/[a-z0-9][a-z0-9._/-]{0,280}\.(?:jpg|png|webp)$/.test(requestedKey); const key = validSiteKey ? requestedKey : `uploads/${new Date().toISOString().slice(0, 10)}/${id}.${extension}`; const originalName = safeText(request.headers.get("x-filename"), 200) || `upload.${extension}`;
   await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: type }, customMetadata: { originalName } });
   await env.DB.prepare("INSERT INTO media_assets (id, object_key, content_type, original_name, size_bytes) VALUES (?, ?, ?, ?, ?)").bind(id, key, type, originalName, bytes.byteLength).run();
   return asJson({ ok: true, asset: { id, key, url: `/api/media/${encodeURIComponent(key)}`, type, size: bytes.byteLength } }, 201);

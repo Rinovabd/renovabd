@@ -5,6 +5,7 @@ import { ProductCard } from "@/components/ProductCard";
 import { StoreHeader } from "@/components/StoreHeader";
 import { formatBDT, productSeed, type Product } from "@/lib/catalog";
 import { fetchProducts } from "@/lib/api";
+import { cloudflareAssets } from "@/lib/cloudflare-assets";
 
 type BagEntry = Product & { quantity: number };
 
@@ -45,7 +46,7 @@ export default function Home() {
             <div className="hero-proof"><span><Check size={15} />Cash on delivery</span><span><Check size={15} />Thoughtfully sourced</span></div>
           </div>
           <div className="hero-visual">
-            <img src="/manus-storage/rinovabd-hero-ritual_f76d3417.png" alt="Rinova skincare ritual" />
+            <img src={cloudflareAssets.heroRitual} alt="Rinova skincare ritual" />
             <div className="hero-sticker"><span>YOUR<br />DAILY<br />EDIT</span><ArrowDownRight size={24} /></div>
             <div className="hero-caption">A luminous new<br />point of view.</div>
           </div>
@@ -62,13 +63,13 @@ export default function Home() {
         </section>
 
         <section className="split-feature">
-          <div className="feature-image"><img src="/manus-storage/rinovabd-shop-editorial-ribbon_8a549e76.png" alt="Rinova beauty essentials arranged among folded pink ribbon" /></div>
+          <div className="feature-image"><img src={cloudflareAssets.shopEditorialRibbon} alt="Rinova beauty essentials arranged among folded pink ribbon" /></div>
           <div className="feature-copy"><span className="eyebrow">The Ritual, made simple</span><h2>Good skin days<br />don’t need a <em>twelve-step plan.</em></h2><p>We choose the pieces that earn their place in a bag: considered colour, useful textures, and a little daily lift.</p><a href="/shop" className="text-action text-action--dark">Build your ritual <ArrowRight size={17} /></a><div className="numbered-note"><span>01</span><p>Shop by how you want to feel, not by a 19-step routine.</p></div></div>
         </section>
 
         <section id="story" className="story-section section-pad">
           <div className="story-header"><span className="eyebrow">Our point of view</span><p>Rinova is a Bangladesh beauty house for an expressive, uncomplicated everyday.</p></div>
-          <div className="story-grid"><div className="story-image"><img src="/manus-storage/rinovabd-collection-face_bcb32ab5.png" alt="A Rinova makeup look" /></div><div className="story-statement"><h2>Less noise.<br />More <em>you.</em></h2><p>We believe a beauty routine can look like a pause, a colour decision, or a tiny act of showing up for yourself.</p><a href="/shop" className="button button--pink">Meet the collection <ArrowRight size={18} /></a></div></div>
+          <div className="story-grid"><div className="story-image"><img src={cloudflareAssets.collectionFace} alt="A Rinova makeup look" /></div><div className="story-statement"><h2>Less noise.<br />More <em>you.</em></h2><p>We believe a beauty routine can look like a pause, a colour decision, or a tiny act of showing up for yourself.</p><a href="/shop" className="button button--pink">Meet the collection <ArrowRight size={18} /></a></div></div>
         </section>
 
         <section className="newsletter-section"><div><span className="eyebrow">Keep close</span><h2>Ritual notes, <em>before they go live.</em></h2></div>{subscribed ? <div className="subscription-success"><Check size={19} /> You’re on the edit list.</div> : <form onSubmit={(event) => { event.preventDefault(); if (email.trim()) setSubscribed(true); }}><label htmlFor="email">Your email</label><div><input id="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /><button aria-label="Subscribe"><ArrowRight size={20} /></button></div><p>Launch notes only. No unnecessary noise.</p></form>}</section>

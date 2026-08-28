@@ -52,10 +52,10 @@ CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
 CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC);
 
 INSERT OR IGNORE INTO products (id, name, category, price_bdt, compare_at_bdt, image_url, shade, stock, status, description) VALUES
-  ('rnv-001', 'Cloud Melt Blush', 'Complexion', 1290, 1490, '/manus-storage/rinovabd-product-pink-essentials_5fd5096d.png', 'Rose flush', 28, 'live', 'A sheer cream flush that builds softly without hiding skin.'),
-  ('rnv-002', 'Satin Drop Serum', 'Skin ritual', 1690, NULL, '/manus-storage/rinovabd-hero-ritual_f76d3417.png', '30 ml', 42, 'live', 'A lightweight daily serum made for a luminous, hydrated finish.'),
-  ('rnv-003', 'Gloss in Pink', 'Lips', 890, NULL, '/manus-storage/rinovabd-collection-face_bcb32ab5.png', 'Petal wash', 8, 'low-stock', 'A glassy lip oil with a translucent petal tint and cushiony slip.'),
-  ('rnv-004', 'The Daily Edit', 'Sets', 2490, NULL, '/manus-storage/rinovabd-product-pink-essentials_5fd5096d.png', 'Four-piece ritual', 16, 'live', 'A concise, colour-considered collection for a better everyday ritual.');
+  ('rnv-001', 'Cloud Melt Blush', 'Complexion', 1290, 1490, 'https://api-v2.rinovabd.com/api/media/site/v2/productEssentials.png', 'Rose flush', 28, 'live', 'A sheer cream flush that builds softly without hiding skin.'),
+  ('rnv-002', 'Satin Drop Serum', 'Skin ritual', 1690, NULL, 'https://api-v2.rinovabd.com/api/media/site/v2/heroRitual.png', '30 ml', 42, 'live', 'A lightweight daily serum made for a luminous, hydrated finish.'),
+  ('rnv-003', 'Gloss in Pink', 'Lips', 890, NULL, 'https://api-v2.rinovabd.com/api/media/site/v2/collectionFace.png', 'Petal wash', 8, 'low-stock', 'A glassy lip oil with a translucent petal tint and cushiony slip.'),
+  ('rnv-004', 'The Daily Edit', 'Sets', 2490, NULL, 'https://api-v2.rinovabd.com/api/media/site/v2/shopEditorialRibbon.png', 'Four-piece ritual', 16, 'live', 'A concise, colour-considered collection for a better everyday ritual.');
 
 INSERT OR IGNORE INTO content_blocks (key, title, body, image_url) VALUES
   ('home-hero', 'Colour, considered.', 'Beauty that fits the life you are actually living.', '/manus-storage/rinovabd-hero-ritual_f76d3417.png');

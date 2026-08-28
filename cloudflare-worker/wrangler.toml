@@ -6,7 +6,7 @@ workers_dev = true
 
 [vars]
 APP_NAME = "Rinovabd v2"
-ALLOWED_ORIGIN = ""
+ALLOWED_ORIGIN = "https://shop-v2.rinovabd.com"
 
 [[d1_databases]]
 binding = "DB"

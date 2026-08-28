@@ -12,6 +12,17 @@ The new backend is deployed as `rinovabd-v2-api`, with an independently provisio
 | Studio authorization | Passed | New token login and a protected admin catalogue request returned `200`. |
 | New R2 upload | Passed | The supplied pink theme image was uploaded to a v2-only object key during the live smoke check. |
 
+## Cloudflare Frontend Verification
+
+The redesigned frontend is served by a separate new Worker named `rinovabd-v2-web`, mapped only to the fresh `shop-v2.rinovabd.com/*` route. Browser verification confirmed that the homepage renders at `https://shop-v2.rinovabd.com/` and that the secured Studio entry route renders at `https://shop-v2.rinovabd.com/admin`. Both pages load campaign imagery through deterministic `site/v2/*` objects in the new `rinovabd-v2-media` bucket, served by the v2 media API rather than legacy infrastructure or platform-local asset URLs.
+
+| Browser route | Result | Observed v2 integration |
+| --- | --- | --- |
+| `https://shop-v2.rinovabd.com/` | Passed | Ribbon Modernism storefront loaded, including live product data and R2-hosted logo, hero, product, and editorial imagery. |
+| `https://shop-v2.rinovabd.com/admin` | Passed | Secured Studio dashboard entry loaded through the frontend Worker’s SPA fallback, with v2 R2-hosted identity and desk imagery. |
+
+The subsequent live release gate returned HTTP `200` for the frontend homepage, Studio SPA route, CORS-restricted catalogue endpoint, Studio login, and authenticated Studio catalogue. It also confirmed the four product images resolve through `https://api-v2.rinovabd.com/api/media/site%2Fv2%2F...`.
+
 ## New v2 Resource Map
 
 | Resource class | New v2 resource | Identifier or route | Verification |
