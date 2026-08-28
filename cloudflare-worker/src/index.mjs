@@ -1,219 +1,79 @@
-/**
- * Rinovabd v2 API — isolated Cloudflare backend.
- * The Worker binds only rinovabd-v2-db, rinovabd-v2-cache, and rinovabd-v2-media.
- * It intentionally contains no legacy resource identifiers, routes, or bindings.
- */
+/** Rinovabd v2 API: separate Cloudflare Worker using only rinovabd-v2-db, rinovabd-v2-cache, and rinovabd-v2-media. Secrets are read only at runtime and never returned. */
 const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ORDER_STATUSES = new Set(["new", "confirmed", "packed", "shipped", "delivered", "cancelled"]);
+const STATUS_NEXT = { new: new Set(["confirmed", "cancelled"]), confirmed: new Set(["packed", "cancelled"]), packed: new Set(["shipped", "cancelled"]), shipped: new Set(["delivered"]), delivered: new Set(), cancelled: new Set() };
 
-const asJson = (payload, status = 200, headers = {}) => new Response(JSON.stringify(payload), {
-  status,
-  headers: { "content-type": "application/json; charset=UTF-8", "cache-control": "no-store", ...headers },
-});
-
+const asJson = (payload, status = 200, headers = {}) => new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=UTF-8", "cache-control": "no-store", ...headers } });
 const error = (code, message, status = 400) => asJson({ ok: false, error: { code, message } }, status);
+const safeText = (value, max = 240) => typeof value === "string" ? value.trim().slice(0, max) : "";
+const id = (prefix) => `${prefix}-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+const base64 = (bytes) => btoa(String.fromCharCode(...bytes));
+const bytesOf = (value) => new TextEncoder().encode(value);
+const emailOf = (value) => safeText(value, 254).toLowerCase();
+const validEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
 function cors(origin, env) {
-  const configured = String(env.ALLOWED_ORIGIN || "").trim();
-  const permitted = configured ? configured === origin : origin || "*";
-  return {
-    "access-control-allow-origin": permitted ? (configured || origin || "*") : "null",
-    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type, x-admin-session, x-filename, x-object-key",
-    "access-control-max-age": "86400",
-    vary: "Origin",
-  };
+  const configured = String(env.ALLOWED_ORIGIN || "").trim(); const permitted = configured ? configured === origin : Boolean(origin);
+  return { "access-control-allow-origin": permitted ? (configured || origin) : "null", "access-control-allow-methods": "GET, POST, PATCH, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-admin-session, x-user-session, x-filename, x-object-key", "access-control-max-age": "86400", vary: "Origin" };
 }
+function withCors(response, origin, env) { const headers = new Headers(response.headers); Object.entries(cors(origin, env)).forEach(([key, value]) => headers.set(key, value)); return new Response(response.body, { status: response.status, headers }); }
+async function readJson(request) { try { return await request.json(); } catch { return null; } }
+async function digest(value) { return base64(new Uint8Array(await crypto.subtle.digest("SHA-256", bytesOf(value)))); }
+async function passwordHash(password, salt) { const key = await crypto.subtle.importKey("raw", bytesOf(password), "PBKDF2", false, ["deriveBits"]); const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: bytesOf(salt), iterations: 100000 }, key, 256); return base64(new Uint8Array(bits)); }
+function equal(left, right) { if (!left || !right || left.length !== right.length) return false; let result = 0; for (let index = 0; index < left.length; index += 1) result |= left.charCodeAt(index) ^ right.charCodeAt(index); return result === 0; }
+function adminSecrets(env) { return { username: safeText(env["ADMIN-USERNAME"] || env.ADMIN_USERNAME, 120), password: String(env["ADMIN-PASSWORD"] || env.ADMIN_PASSWORD || "").trim(), token: String(env.ADMIN_API_TOKEN || "").trim() }; }
 
-function withCors(response, origin, env) {
-  const headers = new Headers(response.headers);
-  Object.entries(cors(origin, env)).forEach(([key, value]) => headers.set(key, value));
-  return new Response(response.body, { status: response.status, headers });
-}
+async function userSession(request, env) { const session = request.headers.get("x-user-session") || ""; if (!session || !env.CACHE) return null; const record = await env.CACHE.get(`customer-session:${session}`, "json"); return record?.role === "customer" ? { ...record, session } : null; }
+async function adminSession(request, env) { const secrets = adminSecrets(env); const direct = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || ""; if (direct && secrets.token && equal(direct, secrets.token)) return { role: "admin", direct: true }; const session = request.headers.get("x-admin-session") || ""; if (!session || !env.CACHE) return null; const record = await env.CACHE.get(`admin-session:${session}`, "json"); return record?.role === "admin" ? { ...record, session } : null; }
+async function requireAdmin(request, env) { const secrets = adminSecrets(env); if (!secrets.username && !secrets.password && !secrets.token) return error("ADMIN_SETUP_REQUIRED", "Configure Studio credentials on the new v2 Worker.", 503); const record = await adminSession(request, env); return record ? null : error("UNAUTHORISED", "A valid Studio session is required.", 401); }
+async function requireUser(request, env) { const record = await userSession(request, env); return record ? [record, null] : [null, error("UNAUTHORISED", "Sign in to continue.", 401)]; }
 
-function normaliseProduct(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    price: row.price_bdt,
-    compareAt: row.compare_at_bdt,
-    image: row.image_url,
-    shade: row.shade,
-    stock: row.stock,
-    status: row.status === "low-stock" ? "Low stock" : row.status === "live" ? "Live" : "Draft",
-    description: row.description,
-  };
-}
+function normaliseProduct(row) { return { id: row.id, name: row.name, category: row.category, price: row.price_bdt, compareAt: row.compare_at_bdt, image: row.image_url, shade: row.shade, stock: row.stock, status: row.status === "low-stock" ? "Low stock" : row.status === "live" ? "Live" : "Draft", description: row.description, sku: row.sku || "", barcode: row.barcode || "", slug: row.slug || "", featured: Boolean(row.featured), lowStockThreshold: row.low_stock_threshold ?? 10 }; }
+function validProduct(input) { const name = safeText(input?.name, 120); const category = safeText(input?.category, 80); const image = safeText(input?.image, 1024); const price = Number(input?.price); const stock = Number(input?.stock); if (!name || !category || !image || !Number.isInteger(price) || price < 0 || !Number.isInteger(stock) || stock < 0) return null; const statuses = { Live: "live", Draft: "draft", "Low stock": "low-stock", live: "live", draft: "draft", "low-stock": "low-stock" }; const status = statuses[input.status] || "draft"; const compareAt = input.compareAt === undefined || input.compareAt === null || input.compareAt === "" ? null : Number(input.compareAt); if (compareAt !== null && (!Number.isInteger(compareAt) || compareAt < price)) return null; const threshold = Number(input.lowStockThreshold ?? 10); if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100000) return null; return { name, category, image, price, stock, status, compareAt, shade: safeText(input.shade, 100), description: safeText(input.description, 1400), sku: safeText(input.sku, 80), barcode: safeText(input.barcode, 80), slug: safeText(input.slug, 120).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/(^-|-$)/g, ""), featured: input.featured ? 1 : 0, threshold }; }
+function validCategory(input) { const name = safeText(input?.name, 80); const slug = safeText(input?.slug, 120).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/(^-|-$)/g, ""); const description = safeText(input?.description, 480); if (!name || !slug) return null; return { name, slug, description, status: input?.status === "draft" ? "draft" : "live", sortOrder: Number.isInteger(Number(input?.sortOrder)) ? Number(input.sortOrder) : 0 }; }
 
-async function readJson(request) {
-  try { return await request.json(); } catch { return null; }
-}
+async function health(env) { let db = "unavailable"; try { await env.DB.prepare("SELECT 1 AS ok").first(); db = "ok"; } catch { db = "degraded"; } return asJson({ ok: db === "ok", service: "rinovabd-v2-api", resources: { database: db, cache: env.CACHE ? "configured" : "unavailable", media: env.MEDIA ? "configured" : "unavailable" } }, db === "ok" ? 200 : 503); }
 
-function safeText(value, max = 240) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
+async function products(request, env, categorySlug = "") { const url = new URL(request.url); const requestedCategory = safeText(url.searchParams.get("category"), 80); const q = safeText(url.searchParams.get("q"), 80); const showAll = url.searchParams.get("all") === "true"; const terms = []; const bindings = []; if (!showAll) terms.push("p.status != 'draft'"); const category = requestedCategory || categorySlug; if (category) { terms.push(categorySlug ? "c.slug = ?" : "p.category = ?"); bindings.push(category); } if (q) { terms.push("(p.name LIKE ? OR p.category LIKE ? OR p.shade LIKE ? OR m.sku LIKE ? OR m.barcode LIKE ?)"); bindings.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); } const clause = terms.length ? `WHERE ${terms.join(" AND ")}` : ""; const query = `SELECT p.*, m.sku, m.barcode, m.slug, m.featured, m.low_stock_threshold FROM products p LEFT JOIN product_meta m ON m.product_id=p.id LEFT JOIN categories c ON c.name=p.category ${clause} ORDER BY m.featured DESC, p.created_at DESC`; const rows = await env.DB.prepare(query).bind(...bindings).all(); return asJson({ ok: true, products: rows.results.map(normaliseProduct) }, 200, { "cache-control": "public, max-age=60" }); }
 
-function validProduct(input) {
-  const name = safeText(input?.name, 120);
-  const category = safeText(input?.category, 80);
-  const image = safeText(input?.image, 1024);
-  const price = Number(input?.price);
-  const stock = Number(input?.stock);
-  if (!name || !category || !image || !Number.isInteger(price) || price < 0 || !Number.isInteger(stock) || stock < 0) return null;
-  const statusMap = { Live: "live", Draft: "draft", "Low stock": "low-stock", live: "live", draft: "draft", "low-stock": "low-stock" };
-  const status = statusMap[input.status] || "draft";
-  const compareAt = input.compareAt === undefined || input.compareAt === null || input.compareAt === "" ? null : Number(input.compareAt);
-  if (compareAt !== null && (!Number.isInteger(compareAt) || compareAt < price)) return null;
-  return { name, category, image, price, stock, status, compareAt, shade: safeText(input.shade, 100), description: safeText(input.description, 1400) };
-}
+async function categories(request, env, slug = "") { if (slug) { const row = await env.DB.prepare("SELECT id, name, slug, description, sort_order FROM categories WHERE slug=? AND status='live'").bind(slug).first(); if (!row) return error("NOT_FOUND", "Category was not found.", 404); const catalogue = await products(new Request(request.url), env, slug); const data = await catalogue.json(); return asJson({ ok: true, category: { id: row.id, name: row.name, slug: row.slug, description: row.description, sortOrder: row.sort_order }, products: data.products }); }
+  const rows = await env.DB.prepare("SELECT c.id, c.name, c.slug, c.description, c.sort_order, COUNT(p.id) AS product_count FROM categories c LEFT JOIN products p ON p.category=c.name AND p.status!='draft' WHERE c.status='live' GROUP BY c.id ORDER BY c.sort_order, c.name").all(); return asJson({ ok: true, categories: rows.results.map((row) => ({ id: row.id, name: row.name, slug: row.slug, description: row.description, sortOrder: row.sort_order, productCount: row.product_count })) }); }
 
-async function adminAuthenticated(request, env) {
-  const expectedToken = String(env.ADMIN_API_TOKEN || "").trim();
-  if (!expectedToken) return { ok: false, setupRequired: true };
-  const direct = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
-  if (direct && direct === expectedToken) return { ok: true };
-  const session = request.headers.get("x-admin-session") || "";
-  if (!session || !env.CACHE) return { ok: false };
-  const sessionRecord = await env.CACHE.get(`admin-session:${session}`, "json");
-  return sessionRecord?.role === "admin" ? { ok: true } : { ok: false };
-}
+async function register(request, env) { const input = await readJson(request); const name = safeText(input?.name, 120); const email = emailOf(input?.email); const password = String(input?.password || ""); if (!name || !validEmail(email) || password.length < 8 || password.length > 128) return error("INVALID_ACCOUNT", "Enter a name, valid email, and password of at least 8 characters.", 422); const existing = await env.DB.prepare("SELECT id FROM users WHERE email=?").bind(email).first(); if (existing) return error("ACCOUNT_EXISTS", "An account already exists for this email.", 409); const salt = base64(crypto.getRandomValues(new Uint8Array(16))); const hash = await passwordHash(password, salt); const userId = id("usr"); await env.DB.prepare("INSERT INTO users (id,name,email,password_hash,password_salt) VALUES (?,?,?,?,?)").bind(userId, name, email, hash, salt).run(); return createUserSession(env, { id: userId, name, email }, 201); }
+async function createUserSession(env, user, status = 200) { const session = crypto.randomUUID(); await env.CACHE.put(`customer-session:${session}`, JSON.stringify({ role: "customer", userId: user.id, name: user.name, email: user.email }), { expirationTtl: 60 * 60 * 24 * 14 }); return asJson({ ok: true, session, user: { id: user.id, name: user.name, email: user.email }, expiresInSeconds: 1209600 }, status); }
+async function customerLogin(request, env) { const input = await readJson(request); const email = emailOf(input?.email); const password = String(input?.password || ""); const user = validEmail(email) ? await env.DB.prepare("SELECT * FROM users WHERE email=?").bind(email).first() : null; if (!user || !equal(await passwordHash(password, user.password_salt), user.password_hash)) return error("INVALID_CREDENTIALS", "Email or password is not correct.", 401); return createUserSession(env, user); }
+async function customerLogout(request, env) { const session = request.headers.get("x-user-session") || ""; if (session && env.CACHE) await env.CACHE.delete(`customer-session:${session}`); return asJson({ ok: true }); }
+async function customerMe(request, env) { const [user, denied] = await requireUser(request, env); if (denied) return denied; return asJson({ ok: true, user: { id: user.userId, name: user.name, email: user.email } }); }
 
-async function requireAdmin(request, env) {
-  const auth = await adminAuthenticated(request, env);
-  if (auth.ok) return null;
-  return auth.setupRequired ? error("ADMIN_SETUP_REQUIRED", "Set ADMIN_API_TOKEN as a secret on the new v2 Worker before admin routes can be used.", 503) : error("UNAUTHORISED", "An admin session or bearer token is required.", 401);
-}
+async function adminLogin(request, env) { const input = await readJson(request); const username = safeText(input?.username, 120); const password = String(input?.password || ""); const secrets = adminSecrets(env); const credentialsReady = Boolean(secrets.username && secrets.password); const token = safeText(input?.token, 512); const legacyAllowed = secrets.token && token && equal(token, secrets.token); const usernameAllowed = credentialsReady && equal(username, secrets.username) && equal(password, secrets.password); if (!legacyAllowed && !usernameAllowed) return credentialsReady || secrets.token ? error("INVALID_CREDENTIALS", "Studio username or password is not correct.", 401) : error("ADMIN_SETUP_REQUIRED", "Configure Studio credentials on the new v2 Worker.", 503); const session = crypto.randomUUID(); await env.CACHE.put(`admin-session:${session}`, JSON.stringify({ role: "admin", username: usernameAllowed ? username : "automation" }), { expirationTtl: 60 * 60 * 12 }); return asJson({ ok: true, session, expiresInSeconds: 43200 }); }
+async function adminLogout(request, env) { const session = request.headers.get("x-admin-session") || ""; if (session && env.CACHE) await env.CACHE.delete(`admin-session:${session}`); return asJson({ ok: true }); }
 
-async function health(env) {
-  let db = "unavailable";
-  try { await env.DB.prepare("SELECT 1 AS ok").first(); db = "ok"; } catch { db = "degraded"; }
-  return asJson({ ok: db === "ok", service: "rinovabd-v2-api", resources: { database: db, cache: env.CACHE ? "configured" : "unavailable", media: env.MEDIA ? "configured" : "unavailable" } }, db === "ok" ? 200 : 503);
-}
+async function createOrder(request, env) { const input = await readJson(request); const customerName = safeText(input?.customerName, 120); const email = emailOf(input?.email); const phone = safeText(input?.phone, 30); const deliveryAddress = safeText(input?.deliveryAddress, 500); const items = Array.isArray(input?.items) ? input.items.slice(0, 20) : []; const paymentMethod = input?.paymentMethod === "mobile-payment" ? "mobile-payment" : "cod"; if (!customerName || !validEmail(email) || !phone || !deliveryAddress || !items.length) return error("INVALID_ORDER", "Name, email, phone, delivery address, and at least one item are required.", 422); const productIds = [...new Set(items.map((item) => safeText(item?.id, 80)).filter(Boolean))]; if (!productIds.length) return error("INVALID_ITEMS", "Order items are not valid.", 422); const placeholders = productIds.map(() => "?").join(","); const result = await env.DB.prepare(`SELECT id,name,price_bdt,stock,status FROM products WHERE id IN (${placeholders})`).bind(...productIds).all(); const byId = new Map(result.results.map((row) => [row.id, row])); const orderItems = []; for (const item of items) { const product = byId.get(safeText(item?.id, 80)); const quantity = Number(item?.quantity); if (!product || product.status === "draft" || !Number.isInteger(quantity) || quantity < 1 || quantity > 10 || product.stock < quantity) return error("ITEM_UNAVAILABLE", "One or more selected items are unavailable.", 409); orderItems.push({ id: product.id, name: product.name, quantity, unitPrice: product.price_bdt, lineTotal: product.price_bdt * quantity }); }
+  const subtotal = orderItems.reduce((total, item) => total + item.lineTotal, 0); const delivery = subtotal >= 2000 ? 0 : 150; const orderId = `RV-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`; const invoiceNumber = `INV-${orderId.slice(3)}`; const access = base64(crypto.getRandomValues(new Uint8Array(24))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", ""); const currentUser = await userSession(request, env);
+  const statements = [env.DB.prepare("INSERT INTO orders (id,customer_name,phone,delivery_address,items_json,subtotal_bdt,delivery_bdt,total_bdt,payment_method,status) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(orderId, customerName, phone, deliveryAddress, JSON.stringify(orderItems), subtotal, delivery, subtotal + delivery, paymentMethod, "new"), env.DB.prepare("INSERT INTO order_identity (order_id,user_id,email,invoice_number) VALUES (?,?,?,?)").bind(orderId, currentUser?.userId || null, email, invoiceNumber), env.DB.prepare("INSERT INTO invoices (id,order_id,invoice_number) VALUES (?,?,?)").bind(id("inv"), orderId, invoiceNumber), env.DB.prepare("INSERT INTO order_access (order_id,access_hash) VALUES (?,?)").bind(orderId, await digest(access)), env.DB.prepare("INSERT INTO tracking_events (id,order_id,status,note) VALUES (?,?,?,?)").bind(id("evt"), orderId, "new", "Order received")];
+  for (const item of orderItems) { statements.push(env.DB.prepare("INSERT INTO order_items (id,order_id,product_id,product_name,quantity,unit_price_bdt,line_total_bdt) VALUES (?,?,?,?,?,?,?)").bind(id("item"), orderId, item.id, item.name, item.quantity, item.unitPrice, item.lineTotal), env.DB.prepare("UPDATE products SET stock=stock-?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND stock>=?").bind(item.quantity, item.id, item.quantity), env.DB.prepare("INSERT INTO inventory_movements (id,product_id,delta,reason,note) VALUES (?,?,?,?,?)").bind(id("stock"), item.id, -item.quantity, "checkout", orderId)); }
+  await env.DB.batch(statements); return asJson({ ok: true, order: { id: orderId, subtotal, delivery, total: subtotal + delivery, paymentMethod, status: "new" }, invoice: { number: invoiceNumber, url: `/invoice/${orderId}?access=${encodeURIComponent(access)}` }, tracking: { url: `/track/${orderId}?access=${encodeURIComponent(access)}` } }, 201); }
 
-async function products(request, env) {
-  const url = new URL(request.url);
-  const requestedCategory = safeText(url.searchParams.get("category"), 80);
-  const q = safeText(url.searchParams.get("q"), 80);
-  const showAll = url.searchParams.get("all") === "true";
-  const terms = []; const bindings = [];
-  if (!showAll) terms.push("status != 'draft'");
-  if (requestedCategory) { terms.push("category = ?"); bindings.push(requestedCategory); }
-  if (q) { terms.push("(name LIKE ? OR category LIKE ? OR shade LIKE ?)"); bindings.push(`%${q}%`, `%${q}%`, `%${q}%`); }
-  const clause = terms.length ? `WHERE ${terms.join(" AND ")}` : "";
-  const statement = env.DB.prepare(`SELECT id, name, category, price_bdt, compare_at_bdt, image_url, shade, stock, status, description FROM products ${clause} ORDER BY created_at DESC`).bind(...bindings);
-  const rows = await statement.all();
-  return asJson({ ok: true, products: rows.results.map(normaliseProduct) }, 200, { "cache-control": "public, max-age=60" });
-}
+async function loadOrderAccess(request, env, orderId) { const admin = await adminSession(request, env); const user = await userSession(request, env); const access = new URL(request.url).searchParams.get("access") || ""; const identity = await env.DB.prepare("SELECT oi.user_id,oi.email,oi.invoice_number,o.* FROM orders o JOIN order_identity oi ON oi.order_id=o.id WHERE o.id=?").bind(orderId).first(); if (!identity) return [null, error("NOT_FOUND", "Order was not found.", 404)]; if (admin || (user && identity.user_id === user.userId)) return [identity, null]; const record = await env.DB.prepare("SELECT access_hash FROM order_access WHERE order_id=?").bind(orderId).first(); if (record && access && equal(await digest(access), record.access_hash)) return [identity, null]; return [null, error("UNAUTHORISED", "A valid order access link or account session is required.", 401)]; }
+async function orderDetail(request, env, orderId) { const [order, denied] = await loadOrderAccess(request, env, orderId); if (denied) return denied; const rows = await env.DB.prepare("SELECT product_id,product_name,quantity,unit_price_bdt,line_total_bdt FROM order_items WHERE order_id=?").bind(orderId).all(); const events = await env.DB.prepare("SELECT status,note,created_at FROM tracking_events WHERE order_id=? ORDER BY created_at ASC").bind(orderId).all(); return asJson({ ok: true, order: { id: order.id, invoiceNumber: order.invoice_number, status: order.status, paymentMethod: order.payment_method, subtotal: order.subtotal_bdt, delivery: order.delivery_bdt, total: order.total_bdt, createdAt: order.created_at, items: rows.results.map((item) => ({ id: item.product_id, name: item.product_name, quantity: item.quantity, unitPrice: item.unit_price_bdt, lineTotal: item.line_total_bdt })), tracking: events.results.map((event) => ({ status: event.status, note: event.note, createdAt: event.created_at })) } }); }
+async function invoiceDetail(request, env, orderId) { const detail = await orderDetail(request, env, orderId); if (!detail.ok) return detail; const body = await detail.json(); return asJson({ ok: true, invoice: { number: body.order.invoiceNumber, issuedAt: body.order.createdAt, order: body.order } }); }
 
-async function createOrder(request, env) {
-  const input = await readJson(request);
-  const customerName = safeText(input?.customerName, 120);
-  const phone = safeText(input?.phone, 30);
-  const deliveryAddress = safeText(input?.deliveryAddress, 500);
-  const items = Array.isArray(input?.items) ? input.items.slice(0, 20) : [];
-  const paymentMethod = input?.paymentMethod === "mobile-payment" ? "mobile-payment" : "cod";
-  if (!customerName || !phone || !deliveryAddress || !items.length) return error("INVALID_ORDER", "Name, phone, delivery address, and at least one item are required.", 422);
-  const productIds = [...new Set(items.map((item) => safeText(item?.id, 80)).filter(Boolean))];
-  if (!productIds.length) return error("INVALID_ITEMS", "Order items are not valid.", 422);
-  const placeholders = productIds.map(() => "?").join(",");
-  const catalogue = await env.DB.prepare(`SELECT id, name, price_bdt, stock, status FROM products WHERE id IN (${placeholders})`).bind(...productIds).all();
-  const byId = new Map(catalogue.results.map((row) => [row.id, row]));
-  const orderItems = [];
-  for (const item of items) {
-    const id = safeText(item?.id, 80); const quantity = Number(item?.quantity);
-    const product = byId.get(id);
-    if (!product || product.status === "draft" || !Number.isInteger(quantity) || quantity < 1 || quantity > 10 || product.stock < quantity) return error("ITEM_UNAVAILABLE", "One or more items are not currently available in the requested quantity.", 409);
-    orderItems.push({ id, name: product.name, quantity, unitPrice: product.price_bdt, lineTotal: product.price_bdt * quantity });
-  }
-  const subtotal = orderItems.reduce((total, item) => total + item.lineTotal, 0);
-  const delivery = subtotal >= 2000 ? 0 : 150;
-  const id = `RV-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO orders (id, customer_name, phone, delivery_address, items_json, subtotal_bdt, delivery_bdt, total_bdt, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, customerName, phone, deliveryAddress, JSON.stringify(orderItems), subtotal, delivery, subtotal + delivery, paymentMethod),
-    ...orderItems.map((item) => env.DB.prepare("UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(item.quantity, item.id)),
-  ]);
-  return asJson({ ok: true, order: { id, subtotal, delivery, total: subtotal + delivery, paymentMethod, status: "new" } }, 201);
-}
+async function adminProducts(request, env, productId = "") { const denied = await requireAdmin(request, env); if (denied) return denied; if (request.method === "GET") { if (productId) { const row = await env.DB.prepare("SELECT p.*,m.sku,m.barcode,m.slug,m.featured,m.low_stock_threshold FROM products p LEFT JOIN product_meta m ON m.product_id=p.id WHERE p.id=?").bind(productId).first(); return row ? asJson({ ok: true, product: normaliseProduct(row) }) : error("NOT_FOUND", "Product was not found.", 404); } const rows = await env.DB.prepare("SELECT p.*,m.sku,m.barcode,m.slug,m.featured,m.low_stock_threshold FROM products p LEFT JOIN product_meta m ON m.product_id=p.id ORDER BY p.updated_at DESC").all(); return asJson({ ok: true, products: rows.results.map(normaliseProduct) }); }
+  const input = await readJson(request); const product = validProduct(input); if (!product) return error("INVALID_PRODUCT", "Provide valid product, category, price, stock, image, and threshold data.", 422); const category = await env.DB.prepare("SELECT id FROM categories WHERE name=?").bind(product.category).first(); if (!category) return error("INVALID_CATEGORY", "Choose a configured category.", 422); const targetId = productId || `rnv-${crypto.randomUUID().slice(0, 8)}`; const existing = productId ? await env.DB.prepare("SELECT stock FROM products WHERE id=?").bind(targetId).first() : null; if (productId && !existing) return error("NOT_FOUND", "Product was not found.", 404); const slug = product.slug || `${product.name}-${targetId}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); const statements = [productId ? env.DB.prepare("UPDATE products SET name=?,category=?,price_bdt=?,compare_at_bdt=?,image_url=?,shade=?,stock=?,status=?,description=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(product.name, product.category, product.price, product.compareAt, product.image, product.shade, product.stock, product.status, product.description, targetId) : env.DB.prepare("INSERT INTO products (id,name,category,price_bdt,compare_at_bdt,image_url,shade,stock,status,description) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(targetId, product.name, product.category, product.price, product.compareAt, product.image, product.shade, product.stock, product.status, product.description), env.DB.prepare("INSERT INTO product_meta (product_id,sku,barcode,slug,featured,low_stock_threshold) VALUES (?,?,?,?,?,?) ON CONFLICT(product_id) DO UPDATE SET sku=excluded.sku,barcode=excluded.barcode,slug=excluded.slug,featured=excluded.featured,low_stock_threshold=excluded.low_stock_threshold,updated_at=CURRENT_TIMESTAMP").bind(targetId, product.sku || null, product.barcode || null, slug, product.featured, product.threshold)]; if (existing && existing.stock !== product.stock) statements.push(env.DB.prepare("INSERT INTO inventory_movements (id,product_id,delta,reason,note) VALUES (?,?,?,?,?)").bind(id("stock"), targetId, product.stock - existing.stock, "studio-edit", "Stock level updated in Studio")); await env.DB.batch(statements); const saved = await env.DB.prepare("SELECT p.*,m.sku,m.barcode,m.slug,m.featured,m.low_stock_threshold FROM products p LEFT JOIN product_meta m ON m.product_id=p.id WHERE p.id=?").bind(targetId).first(); return asJson({ ok: true, product: normaliseProduct(saved) }, productId ? 200 : 201); }
 
-async function adminLogin(request, env) {
-  const input = await readJson(request); const token = safeText(input?.token, 512); const expected = String(env.ADMIN_API_TOKEN || "").trim();
-  if (!expected) return error("ADMIN_SETUP_REQUIRED", "Set ADMIN_API_TOKEN as a secret on the new v2 Worker before signing in.", 503);
-  if (!token || token !== expected) return error("UNAUTHORISED", "The supplied access token is not valid.", 401);
-  const session = crypto.randomUUID();
-  await env.CACHE.put(`admin-session:${session}`, JSON.stringify({ role: "admin", createdAt: new Date().toISOString() }), { expirationTtl: 60 * 60 * 12 });
-  return asJson({ ok: true, session, expiresInSeconds: 43200 });
-}
+async function adminCategories(request, env, categoryId = "") { const denied = await requireAdmin(request, env); if (denied) return denied; if (request.method === "GET") { const rows = await env.DB.prepare("SELECT * FROM categories ORDER BY sort_order,name").all(); return asJson({ ok: true, categories: rows.results.map((row) => ({ id: row.id, name: row.name, slug: row.slug, description: row.description, status: row.status, sortOrder: row.sort_order })) }); } const category = validCategory(await readJson(request)); if (!category) return error("INVALID_CATEGORY", "A name and URL slug are required.", 422); const targetId = categoryId || id("cat"); if (categoryId) { const result = await env.DB.prepare("UPDATE categories SET name=?,slug=?,description=?,status=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(category.name, category.slug, category.description, category.status, category.sortOrder, targetId).run(); if (!result.meta.changes) return error("NOT_FOUND", "Category was not found.", 404); } else await env.DB.prepare("INSERT INTO categories (id,name,slug,description,status,sort_order) VALUES (?,?,?,?,?,?)").bind(targetId, category.name, category.slug, category.description, category.status, category.sortOrder).run(); return asJson({ ok: true, category: { id: targetId, ...category } }, categoryId ? 200 : 201); }
 
-async function adminProducts(request, env, id) {
-  const denied = await requireAdmin(request, env); if (denied) return denied;
-  if (request.method === "GET") {
-    if (id) { const row = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first(); return row ? asJson({ ok: true, product: normaliseProduct(row) }) : error("NOT_FOUND", "Product was not found.", 404); }
-    const rows = await env.DB.prepare("SELECT * FROM products ORDER BY updated_at DESC").all(); return asJson({ ok: true, products: rows.results.map(normaliseProduct) });
-  }
-  const input = await readJson(request); const product = validProduct(input); if (!product) return error("INVALID_PRODUCT", "Provide a valid name, category, image, non-negative price, and non-negative whole stock count.", 422);
-  const productId = id || `rnv-${crypto.randomUUID().slice(0, 8)}`;
-  if (id) {
-    const result = await env.DB.prepare("UPDATE products SET name=?, category=?, price_bdt=?, compare_at_bdt=?, image_url=?, shade=?, stock=?, status=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(product.name, product.category, product.price, product.compareAt, product.image, product.shade, product.stock, product.status, product.description, productId).run();
-    if (!result.meta.changes) return error("NOT_FOUND", "Product was not found.", 404);
-  } else {
-    await env.DB.prepare("INSERT INTO products (id, name, category, price_bdt, compare_at_bdt, image_url, shade, stock, status, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(productId, product.name, product.category, product.price, product.compareAt, product.image, product.shade, product.stock, product.status, product.description).run();
-  }
-  const saved = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(productId).first();
-  return asJson({ ok: true, product: normaliseProduct(saved) }, id ? 200 : 201);
-}
+async function adminOrders(request, env, orderId = "") { const denied = await requireAdmin(request, env); if (denied) return denied; if (request.method === "GET") { if (!orderId) { const rows = await env.DB.prepare("SELECT o.id,o.status,o.total_bdt,o.payment_method,o.created_at,oi.email,o.customer_name FROM orders o JOIN order_identity oi ON oi.order_id=o.id ORDER BY o.created_at DESC").all(); return asJson({ ok: true, orders: rows.results.map((row) => ({ id: row.id, status: row.status, total: row.total_bdt, paymentMethod: row.payment_method, createdAt: row.created_at, customerName: row.customer_name, email: row.email })) }); } return orderDetail(request, env, orderId); }
+  const input = await readJson(request); const next = safeText(input?.status, 20); const note = safeText(input?.note, 240); if (!ORDER_STATUSES.has(next)) return error("INVALID_STATUS", "Choose a valid order status.", 422); const current = await env.DB.prepare("SELECT status FROM orders WHERE id=?").bind(orderId).first(); if (!current) return error("NOT_FOUND", "Order was not found.", 404); if (!STATUS_NEXT[current.status]?.has(next)) return error("INVALID_TRANSITION", "This order status change is not allowed.", 409); await env.DB.batch([env.DB.prepare("UPDATE orders SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(next, orderId), env.DB.prepare("INSERT INTO tracking_events (id,order_id,status,note) VALUES (?,?,?,?)").bind(id("evt"), orderId, next, note || `Order marked ${next}`)]); return asJson({ ok: true, status: next }); }
 
-async function mediaUpload(request, env) {
-  const denied = await requireAdmin(request, env); if (denied) return denied;
-  const type = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() || "";
-  const length = Number(request.headers.get("content-length") || "0");
-  if (!ALLOWED_IMAGE_TYPES.has(type)) return error("UNSUPPORTED_MEDIA", "Only JPEG, PNG, and WebP images can be uploaded.", 415);
-  if (length && length > MAX_UPLOAD_BYTES) return error("PAYLOAD_TOO_LARGE", "Images must be 6 MB or smaller.", 413);
-  const bytes = await request.arrayBuffer(); if (!bytes.byteLength || bytes.byteLength > MAX_UPLOAD_BYTES) return error("PAYLOAD_TOO_LARGE", "Images must be 6 MB or smaller.", 413);
-  const extension = type === "image/jpeg" ? "jpg" : type.split("/")[1];
-  const id = crypto.randomUUID(); const requestedKey = safeText(request.headers.get("x-object-key"), 320); const validSiteKey = /^site\/[a-z0-9][a-z0-9._/-]{0,280}\.(?:jpg|png|webp)$/.test(requestedKey); const key = validSiteKey ? requestedKey : `uploads/${new Date().toISOString().slice(0, 10)}/${id}.${extension}`; const originalName = safeText(request.headers.get("x-filename"), 200) || `upload.${extension}`;
-  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: type }, customMetadata: { originalName } });
-  await env.DB.prepare("INSERT INTO media_assets (id, object_key, content_type, original_name, size_bytes) VALUES (?, ?, ?, ?, ?)").bind(id, key, type, originalName, bytes.byteLength).run();
-  return asJson({ ok: true, asset: { id, key, url: `/api/media/${encodeURIComponent(key)}`, type, size: bytes.byteLength } }, 201);
-}
+async function overview(request, env) { const denied = await requireAdmin(request, env); if (denied) return denied; const [stock, orders, media, categories] = await env.DB.batch([env.DB.prepare("SELECT COUNT(*) products,COALESCE(SUM(stock),0) units,SUM(CASE WHEN stock<10 THEN 1 ELSE 0 END) low_stock FROM products").all(), env.DB.prepare("SELECT COUNT(*) orders,COALESCE(SUM(total_bdt),0) revenue,SUM(CASE WHEN status='new' THEN 1 ELSE 0 END) new_orders FROM orders").all(), env.DB.prepare("SELECT COUNT(*) assets FROM media_assets").all(), env.DB.prepare("SELECT COUNT(*) categories FROM categories WHERE status='live'").all()]); return asJson({ ok: true, overview: { inventory: stock.results[0], orders: orders.results[0], media: media.results[0], categories: categories.results[0] } }); }
 
-async function mediaRead(env, key) {
-  const object = await env.MEDIA.get(key); if (!object) return error("NOT_FOUND", "Media asset was not found.", 404);
-  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("etag", object.httpEtag); headers.set("cache-control", "public, max-age=31536000, immutable"); headers.set("x-content-type-options", "nosniff");
-  return new Response(object.body, { headers });
-}
+async function mediaUpload(request, env) { const denied = await requireAdmin(request, env); if (denied) return denied; const type = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() || ""; const length = Number(request.headers.get("content-length") || "0"); if (!ALLOWED_IMAGE_TYPES.has(type)) return error("UNSUPPORTED_MEDIA", "Only JPEG, PNG, and WebP images can be uploaded.", 415); if (length && length > MAX_UPLOAD_BYTES) return error("PAYLOAD_TOO_LARGE", "Images must be 6 MB or smaller.", 413); const bytes = await request.arrayBuffer(); if (!bytes.byteLength || bytes.byteLength > MAX_UPLOAD_BYTES) return error("PAYLOAD_TOO_LARGE", "Images must be 6 MB or smaller.", 413); const extension = type === "image/jpeg" ? "jpg" : type.split("/")[1]; const requestedKey = safeText(request.headers.get("x-object-key"), 320); const validSiteKey = /^site\/[a-z0-9][a-z0-9._/-]{0,280}\.(?:jpg|png|webp)$/.test(requestedKey); const key = validSiteKey ? requestedKey : `uploads/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${extension}`; const originalName = safeText(request.headers.get("x-filename"), 200) || `upload.${extension}`; const mediaId = id("media"); await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: type }, customMetadata: { originalName } }); await env.DB.prepare("INSERT INTO media_assets (id,object_key,content_type,original_name,size_bytes) VALUES (?,?,?,?,?)").bind(mediaId, key, type, originalName, bytes.byteLength).run(); return asJson({ ok: true, asset: { id: mediaId, key, url: `/api/media/${encodeURIComponent(key)}`, type, size: bytes.byteLength } }, 201); }
+async function mediaRead(env, key) { const object = await env.MEDIA.get(key); if (!object) return error("NOT_FOUND", "Media asset was not found.", 404); const headers = new Headers(); object.writeHttpMetadata(headers); headers.set("etag", object.httpEtag); headers.set("cache-control", "public, max-age=31536000, immutable"); headers.set("x-content-type-options", "nosniff"); return new Response(object.body, { headers }); }
 
-async function overview(request, env) {
-  const denied = await requireAdmin(request, env); if (denied) return denied;
-  const [stock, orders, media] = await env.DB.batch([
-    env.DB.prepare("SELECT COUNT(*) AS products, COALESCE(SUM(stock), 0) AS units, SUM(CASE WHEN stock < 10 THEN 1 ELSE 0 END) AS low_stock FROM products").bind(),
-    env.DB.prepare("SELECT COUNT(*) AS orders, COALESCE(SUM(total_bdt), 0) AS revenue, SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) AS new_orders FROM orders").bind(),
-    env.DB.prepare("SELECT COUNT(*) AS assets FROM media_assets").bind(),
-  ]);
-  return asJson({ ok: true, overview: { inventory: stock.results[0], orders: orders.results[0], media: media.results[0] } });
-}
+async function analyticsEvent(request, env) { const input = await readJson(request); const eventName = safeText(input?.eventName, 80).replace(/[^a-z0-9_]/gi, "_"); const path = safeText(input?.path, 300); const productId = safeText(input?.productId, 80); const allowedMetadata = { source: safeText(input?.metadata?.source, 80), campaign: safeText(input?.metadata?.campaign, 80) }; if (!eventName || !path) return error("INVALID_EVENT", "Event name and page path are required.", 422); await env.DB.prepare("INSERT INTO analytics_events (id,event_name,path,product_id,metadata_json) VALUES (?,?,?,?,?)").bind(id("evt"), eventName, path, productId || null, JSON.stringify(allowedMetadata)).run(); return asJson({ ok: true }, 202); }
 
-async function route(request, env) {
-  const url = new URL(request.url); const path = url.pathname.replace(/\/+$/, "") || "/";
-  if (request.method === "OPTIONS") return new Response(null, { status: 204 });
-  if (path === "/api/health" && request.method === "GET") return health(env);
-  if (path === "/api/products" && request.method === "GET") return products(request, env);
-  if (path === "/api/orders" && request.method === "POST") return createOrder(request, env);
-  if (path === "/api/admin/login" && request.method === "POST") return adminLogin(request, env);
-  if (path === "/api/admin/overview" && request.method === "GET") return overview(request, env);
-  if (path === "/api/admin/products" && (request.method === "GET" || request.method === "POST")) return adminProducts(request, env, "");
-  const productMatch = path.match(/^\/api\/admin\/products\/([^/]+)$/);
-  if (productMatch && (request.method === "GET" || request.method === "PATCH")) return adminProducts(request, env, decodeURIComponent(productMatch[1]));
-  if (path === "/api/media" && request.method === "POST") return mediaUpload(request, env);
-  const mediaMatch = path.match(/^\/api\/media\/(.+)$/);
-  if (mediaMatch && request.method === "GET") return mediaRead(env, decodeURIComponent(mediaMatch[1]));
-  return error("NOT_FOUND", "This API route does not exist.", 404);
-}
+async function route(request, env) { const url = new URL(request.url); const path = url.pathname.replace(/\/+$/, "") || "/"; if (request.method === "OPTIONS") return new Response(null, { status: 204 }); if (path === "/api/health" && request.method === "GET") return health(env); if (path === "/api/products" && request.method === "GET") return products(request, env); if (path === "/api/categories" && request.method === "GET") return categories(request, env); const categoryMatch = path.match(/^\/api\/categories\/([^/]+)$/); if (categoryMatch && request.method === "GET") return categories(request, env, decodeURIComponent(categoryMatch[1])); if (path === "/api/auth/register" && request.method === "POST") return register(request, env); if (path === "/api/auth/login" && request.method === "POST") return customerLogin(request, env); if (path === "/api/auth/logout" && request.method === "POST") return customerLogout(request, env); if (path === "/api/auth/me" && request.method === "GET") return customerMe(request, env); if (path === "/api/orders" && request.method === "POST") return createOrder(request, env); const orderMatch = path.match(/^\/api\/orders\/([^/]+)$/); if (orderMatch && request.method === "GET") return orderDetail(request, env, decodeURIComponent(orderMatch[1])); const invoiceMatch = path.match(/^\/api\/invoices\/([^/]+)$/); if (invoiceMatch && request.method === "GET") return invoiceDetail(request, env, decodeURIComponent(invoiceMatch[1])); if (path === "/api/admin/login" && request.method === "POST") return adminLogin(request, env); if (path === "/api/admin/logout" && request.method === "POST") return adminLogout(request, env); if (path === "/api/admin/overview" && request.method === "GET") return overview(request, env); if (path === "/api/admin/products" && (request.method === "GET" || request.method === "POST")) return adminProducts(request, env); const adminProduct = path.match(/^\/api\/admin\/products\/([^/]+)$/); if (adminProduct && (request.method === "GET" || request.method === "PATCH")) return adminProducts(request, env, decodeURIComponent(adminProduct[1])); if (path === "/api/admin/categories" && (request.method === "GET" || request.method === "POST")) return adminCategories(request, env); const adminCategory = path.match(/^\/api\/admin\/categories\/([^/]+)$/); if (adminCategory && request.method === "PATCH") return adminCategories(request, env, decodeURIComponent(adminCategory[1])); if (path === "/api/admin/orders" && request.method === "GET") return adminOrders(request, env); const adminOrder = path.match(/^\/api\/admin\/orders\/([^/]+)$/); if (adminOrder && (request.method === "GET" || request.method === "PATCH")) return adminOrders(request, env, decodeURIComponent(adminOrder[1])); if (path === "/api/media" && request.method === "POST") return mediaUpload(request, env); const mediaMatch = path.match(/^\/api\/media\/(.+)$/); if (mediaMatch && request.method === "GET") return mediaRead(env, decodeURIComponent(mediaMatch[1])); if (path === "/api/analytics/events" && request.method === "POST") return analyticsEvent(request, env); return error("NOT_FOUND", "This API route does not exist.", 404); }
 
-export default {
-  async fetch(request, env) {
-    const origin = request.headers.get("origin") || "";
-    try { return withCors(await route(request, env), origin, env); }
-    catch (cause) { console.error("rinovabd-v2-api", cause); return withCors(error("INTERNAL_ERROR", "The request could not be completed." , 500), origin, env); }
-  },
-};
+export default { async fetch(request, env) { const origin = request.headers.get("origin") || ""; try { return withCors(await route(request, env), origin, env); } catch (cause) { console.error("rinovabd-v2-api", cause instanceof Error ? cause.message : "unknown-error"); return withCors(error("INTERNAL_ERROR", "The request could not be completed.", 500), origin, env); } } };
