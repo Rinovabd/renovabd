@@ -3,8 +3,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const sourcePath = fileURLToPath(new URL("../src/index.mjs", import.meta.url));
+const assistantPath = fileURLToPath(new URL("../src/assistant.mjs", import.meta.url));
 const outputPath = fileURLToPath(new URL("./deploy-v2-worker-request.json", import.meta.url));
-const source = await readFile(sourcePath, "utf8");
+const indexSource = await readFile(sourcePath, "utf8");
+const assistantSource = (await readFile(assistantPath, "utf8")).replace(/^export async function runAssistant/m, "async function runAssistant");
+const source = `${assistantSource}\n${indexSource.replace(/^import \{ runAssistant \} from "\.\/assistant\.mjs";\n/m, "")}`;
 const sourceBase64 = Buffer.from(source).toString("base64");
 
 const executeCode = `async () => {
@@ -16,6 +19,8 @@ const executeCode = `async () => {
       { type: "d1", name: "DB", id: "9a3e6871-3df9-4e7f-8ecc-8b3fcbcefe16" },
       { type: "kv_namespace", name: "CACHE", namespace_id: "3adfac39087040c9ae95b36397ead661" },
       { type: "r2_bucket", name: "MEDIA", bucket_name: "rinovabd-v2-media" },
+      { type: "ai", name: "AI" },
+      { type: "vectorize", name: "ASSISTANT_KNOWLEDGE", index_name: "rinovabd-v2-assistant-knowledge" },
       { type: "plain_text", name: "APP_NAME", text: "Rinovabd v2" },
       { type: "plain_text", name: "ALLOWED_ORIGIN", text: "https://shop-v2.rinovabd.com" }
     ]

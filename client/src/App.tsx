@@ -2,6 +2,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AnalyticsConsent } from "@/components/AnalyticsConsent";
+import { AssistantWidget } from "@/components/AssistantWidget";
 import { AnalyticsRouteTracker } from "@/components/AnalyticsRouteTracker";
 import { SeoManager } from "@/components/SeoManager";
 import { Route, Switch } from "wouter";
@@ -20,4 +21,4 @@ import NotFound from "./pages/NotFound";
 import OrderDocument from "./pages/OrderDocument";
 import Shop from "./pages/Shop";
 function Router() { return <Switch><Route path="/" component={Home} /><Route path="/shop" component={Shop} /><Route path="/categories" component={Categories} /><Route path="/categories/:slug" component={CategoryDetail} /><Route path="/account" component={Account} /><Route path="/cart" component={Cart} /><Route path="/checkout" component={Checkout} /><Route path="/invoice/:id">{() => <OrderDocument mode="invoice" />}</Route><Route path="/track/:id">{() => <OrderDocument mode="tracking" />}</Route><Route path="/admin" component={Admin} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
-export default function App() { return <ErrorBoundary><ThemeProvider defaultTheme="light"><TooltipProvider><AuthProvider><CartProvider><SeoManager /><AnalyticsRouteTracker /><AnalyticsConsent /><Toaster /><Router /></CartProvider></AuthProvider></TooltipProvider></ThemeProvider></ErrorBoundary>; }
+export default function App() { return <ErrorBoundary><ThemeProvider defaultTheme="light"><TooltipProvider><AuthProvider><CartProvider><SeoManager /><AnalyticsRouteTracker /><AnalyticsConsent /><AssistantWidget /><Toaster /><Router /></CartProvider></AuthProvider></TooltipProvider></ThemeProvider></ErrorBoundary>; }

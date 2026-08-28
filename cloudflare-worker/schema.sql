@@ -142,6 +142,32 @@ CREATE INDEX IF NOT EXISTS idx_order_identity_email ON order_identity(email, cre
 CREATE INDEX IF NOT EXISTS idx_tracking_order ON tracking_events(order_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory_movements(product_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS assistant_knowledge (
+  id TEXT PRIMARY KEY,
+  audience TEXT NOT NULL CHECK (audience IN ('customer', 'staff')),
+  locale TEXT NOT NULL CHECK (locale IN ('en', 'bn', 'bn-Latn')),
+  intent TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  product_id TEXT,
+  published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0, 1)),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS assistant_events (
+  id TEXT PRIMARY KEY,
+  conversation_hash TEXT NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('customer', 'staff')),
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('anonymous', 'customer', 'admin')),
+  intent TEXT NOT NULL,
+  locale TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_knowledge_filter ON assistant_knowledge(audience, locale, published, intent);
+CREATE INDEX IF NOT EXISTS idx_assistant_events_conversation ON assistant_events(conversation_hash, created_at DESC);
+
 INSERT OR IGNORE INTO categories (id, name, slug, description, status, sort_order) VALUES
   ('cat-complexion', 'Complexion', 'complexion', 'Skin-first colour for bright, expressive everyday faces.', 'live', 10),
   ('cat-skin-ritual', 'Skin ritual', 'skin-ritual', 'Useful texture and everyday hydration.', 'live', 20),

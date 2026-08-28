@@ -30,3 +30,14 @@
 - [x] Add canonical metadata, social metadata, crawl directives, and public JSON-LD for the storefront only; customer, checkout, invoice, tracking, and Studio routes remain noindex.
 - [x] Generate `sitemap.xml` and `robots.txt` at build time from the explicit public route list; exclude private and parameterized routes.
 - [x] Run typecheck, production build, security audit, strict sequential Playwright tests, public sitemap/robots checks, and live Cloudflare browser verification before deployment.
+
+## Cloudflare AI Assistants
+
+- [x] Inspect isolated v2 Worker bindings and current frontend/API boundaries for Workers AI, Vectorize, D1, and session authorization.
+- [x] Define customer/staff channel policy, intent/language handling, approved knowledge filters, grounded context limits, answer validation, redaction, and event schema.
+- [x] Implement the customer assistant with direct-answer/why/next-step formatting and Worker-verified product cards.
+- [x] Implement the protected staff assistant with grounded read-only operations and explicit approval boundaries for mutations.
+- [x] Add deterministic Worker unit/security tests and serialized desktop/mobile browser coverage for both assistant channels, including failure and privacy paths.
+- [ ] Deploy only the isolated v2 assistant revision, verify live health and protected boundaries, update README and release evidence, push source-only GitHub changes, and save a checkpoint.
+
+> Assistant implementation must never expose credentials, raw service-account material, customer private data, payment details, or unapproved operational actions.

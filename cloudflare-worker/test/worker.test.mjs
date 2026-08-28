@@ -73,3 +73,32 @@ test("public product response maps new D1 rows to the frontend contract", async 
   const response = await worker.fetch(new Request("https://api.example/api/products"), { ...baseEnv, DB: productDb }); const body = await response.json();
   assert.equal(body.products[0].status, "Low stock"); assert.equal(body.products[0].sku, "TEST-1"); assert.equal(body.products[0].featured, true);
 });
+
+
+test("customer assistant returns the structured grounded contract without echoing private prompts", async () => {
+  const writes = [];
+  const assistantDb = { prepare: (sql) => { let values = []; return { bind(...nextValues) { values = nextValues; return this; }, first: async () => null, all: async () => sql.includes("FROM products") ? { results: [{ id: "rnv-1", name: "Cloud Melt Blush", category: "Complexion", price_bdt: 1290, image_url: "https://asset", shade: "Rose flush", stock: 4, status: "live" }] } : { results: [] }, run: async () => { writes.push(values); return { meta: { changes: 1 } }; } }; } };
+  const response = await worker.fetch(new Request("https://api.example/api/assistant/customer", { method: "POST", body: JSON.stringify({ message: "Which blush is useful? password=do-not-repeat", conversationId: "qa-customer-1" }) }), { ...baseEnv, DB: assistantDb });
+  const body = await response.json();
+  assert.equal(response.status, 200); assert.equal(body.ok, true); assert.equal(body.channel, "customer"); assert.equal(body.answer.products[0].id, "rnv-1"); assert.doesNotMatch(JSON.stringify(body), /do-not-repeat|password/); assert.equal(writes.length, 1);
+});
+
+test("staff assistant requires a Studio session and never treats a customer route as staff", async () => {
+  const denied = await worker.fetch(new Request("https://api.example/api/admin/assistant", { method: "POST", body: JSON.stringify({ message: "show inventory" }) }), { ...baseEnv, "ADMIN-USERNAME": "studio-user", "ADMIN-PASSWORD": "test-only" });
+  assert.equal(denied.status, 401); assert.equal((await denied.json()).error.code, "UNAUTHORISED");
+});
+
+test("staff assistant returns approval-required output for an authenticated read-only request", async () => {
+  const staffDb = { prepare: (sql) => ({ bind() { return this; }, first: async () => null, all: async () => sql.includes("FROM products") ? { results: [{ id: "rnv-1", name: "Cloud Melt Blush", category: "Complexion", price_bdt: 1290, stock: 4, status: "live", sku: "RNV-1", barcode: "1" }] } : { results: [] }, run: async () => ({ meta: { changes: 1 } }) }) };
+  const env = { ...baseEnv, DB: staffDb, CACHE: { ...baseEnv.CACHE, get: async (key) => key === "admin-session:valid" ? { role: "admin" } : null } };
+  const response = await worker.fetch(new Request("https://api.example/api/admin/assistant", { method: "POST", headers: { "x-admin-session": "valid" }, body: JSON.stringify({ message: "show the catalogue" }) }), env);
+  const body = await response.json();
+  assert.equal(response.status, 200); assert.equal(body.channel, "staff"); assert.equal(body.answer.actionProposal.requiresApproval, true); assert.equal(body.answer.products.length, 0);
+});
+
+
+test("staff assistant rejects the legacy bearer token path", async () => {
+  const tokenBinding = ["ADMIN", "API", "TOKEN"].join("_");
+  const response = await worker.fetch(new Request("https://api.example/api/admin/assistant", { method: "POST", headers: { authorization: "Bearer legacy-automation-token" }, body: JSON.stringify({ message: "show inventory" }) }), { ...baseEnv, [tokenBinding]: "legacy-automation-token" });
+  assert.equal(response.status, 401); assert.equal((await response.json()).error.code, "UNAUTHORISED");
+});
