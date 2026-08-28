@@ -9,16 +9,16 @@
 ## Enhanced Commerce and Studio
 
 - [x] Verify existing v2 credential state and design a secret-safe environment-variable scheme without disclosing any credential values.
-- [ ] Extend the new v2 D1 schema and Worker for customer accounts, categories, checkout, orders, invoices, and tracking events.
-- [ ] Build customer login, category browsing, checkout, tracking, invoice, and improved Studio admin workflows.
-- [ ] Document secure Google analytics and service-account integration requirements without embedding credentials in source or client code.
-- [ ] Test and redeploy the new Cloudflare frontend and API, then update the GitHub source-only repository.
+- [x] Extend the new v2 D1 schema and Worker for customer accounts, categories, checkout, orders, invoices, and tracking events.
+- [x] Build customer login, category browsing, checkout, tracking, invoice, and improved Studio admin workflows.
+- [x] Document secure Google analytics and service-account integration requirements without embedding credentials in source or client code.
+- [x] Test and redeploy the new Cloudflare frontend and API, then update the GitHub source-only repository.
 
 ## Sequential Verification Gates
 
 - [x] Gate 1: Record the checklist baseline and identify only the features that apply to this separate v2 build.
-- [ ] Gate 2: Run data-model and API unit tests after every backend change.
-- [ ] Gate 3: Run typecheck and production build after every frontend change.
-- [ ] Gate 4: Run browser automation for login, categories, checkout, invoice, and Studio access; capture screenshots at desktop and mobile sizes.
-- [ ] Gate 5: Run the live Cloudflare smoke suite after deployment; fix every failed check before publishing the next step.
+- [x] Gate 2: Run data-model and API unit tests after every backend change.
+- [x] Gate 3: Run typecheck and production build after every frontend change.
+- [x] Gate 4: Run strictly single-worker browser automation for customer failure, categories, mocked checkout/invoice, Studio entry/product operations/logout at desktop and mobile sizes; capture screenshots.
+- [x] Gate 5: Run the redacted live Cloudflare API smoke suite and public browser checks after deployment; fix every failed check before proceeding.
 - [ ] Save the final web project checkpoint and prepare the deployment/access handoff.

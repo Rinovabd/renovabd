@@ -16,12 +16,16 @@ The new backend is deployed as `rinovabd-v2-api`, with an independently provisio
 
 The redesigned frontend is served by a separate new Worker named `rinovabd-v2-web`, mapped only to the fresh `shop-v2.rinovabd.com/*` route. Browser verification confirmed that the homepage renders at `https://shop-v2.rinovabd.com/` and that the secured Studio entry route renders at `https://shop-v2.rinovabd.com/admin`. Both pages load campaign imagery through deterministic `site/v2/*` objects in the new `rinovabd-v2-media` bucket, served by the v2 media API rather than legacy infrastructure or platform-local asset URLs.
 
+The latest rebuilt Ribbon Modernism web bundle was accepted by Cloudflare at **2026-08-28 01:45 UTC** under deployment ID `22009e60522246c99121c223cb1e07f6`. The upload targets only `rinovabd-v2-web`: its source is packaged locally from `dist/public` and delivered directly to Cloudflare. GitHub remains source storage and is not in the deployment path.
+
 | Browser route | Result | Observed v2 integration |
 | --- | --- | --- |
 | `https://shop-v2.rinovabd.com/` | Passed | Ribbon Modernism storefront loaded, including live product data and R2-hosted logo, hero, product, and editorial imagery. |
 | `https://shop-v2.rinovabd.com/admin` | Passed | Secured Studio dashboard entry loaded through the frontend Worker’s SPA fallback, with v2 R2-hosted identity and desk imagery. |
 
 The subsequent live release gate returned HTTP `200` for the frontend homepage, Studio SPA route, CORS-restricted catalogue endpoint, Studio login, and authenticated Studio catalogue. It also confirmed the four product images resolve through `https://api-v2.rinovabd.com/api/media/site%2Fv2%2F...`.
+
+Following the visual refinement, public browser checks confirmed the live category route returned four v2 shelves with its pink category rail and editorial merchandising band. The live account and Studio-entry routes retained their labelled secure controls and rendered the shared custom brand lockup. No credential or customer data was entered during these browser checks; see [release-gate evidence](release-gate-evidence.md) for the redacted outcomes.
 
 ## New v2 Resource Map
 

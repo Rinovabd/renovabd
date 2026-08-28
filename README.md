@@ -17,19 +17,33 @@ Rinovabd v2 is a complete **Ribbon Modernism** redesign: an editorial beauty sto
 
 The React/Tailwind storefront and Studio dashboard are in `client/`. The standalone Cloudflare API, schema, deployment request builders, asset publisher, and verification scripts are in `cloudflare-worker/`. The API fetches catalogue data from new D1, creates temporary Studio sessions in new KV, and stores campaign assets/uploads in new R2.
 
+## Delivered v2 Workflows
+
+| Area | Delivered capability | Data and access boundary |
+| --- | --- | --- |
+| Customer accounts | Registration, sign-in, sign-out, and current-session retrieval. | Customer passwords are salted and PBKDF2-hashed; opaque sessions expire in the new v2 KV and live in browser session storage. |
+| Shopping | Public categories, category shelves, shared bag, validated checkout, and delivery/payment collection. | Catalogue and stock are read from the new D1 database; the browser does not receive operational credentials. |
+| Orders | Immediate printable invoice, protected order/invoice retrieval, and customer-safe tracking stages. | Order documents require the authenticated customer session or the unique access link returned by successful checkout. |
+| Studio | Username/password entry, expiring session logout, product metadata, categories, media, inventory controls, order queue, and validated tracking transitions. | Studio credentials remain Cloudflare Worker secrets; the client holds only an expiring session identifier. |
+| Analytics boundary | Privacy-safe operational event endpoint and a Studio integration-status boundary. | GA4, GTM, and Search Console reports are **not connected yet**. Service-account material is reserved for future server-only use after Google property access is confirmed. |
+
+> **Production data boundary:** automated browser coverage uses deterministic API mocks and does not create a customer, order, or inventory movement in the live store. The live API failure/security checks and public browser rendering are verified. A live customer checkout must be approved first because it creates durable customer/order data and decrements real inventory.
+
 ## Local Quality Checks
 
 ```bash
 pnpm check
 pnpm build
+pnpm test:security
+pnpm test:e2e
 cd cloudflare-worker
 pnpm test
 pnpm typecheck
-node scripts/verify-v2-web-live.mjs
+node scripts/verify-v2-api-upgrade.mjs
 ```
 
-The final live verifier checks the Cloudflare homepage, Studio SPA route, API CORS policy, four-product catalogue, R2-backed media URLs, Studio login, and authenticated catalogue operation. The local Studio token and generated request files remain excluded from version control.
+The API verifier writes an ignored, redacted report and checks health, public categories, invalid customer/admin authentication, unauthenticated Studio denial, invalid checkout denial, authenticated Studio metadata, and the order queue. The Playwright configuration intentionally uses one worker so all desktop and Chromium-mobile scenarios execute one at a time. The latest run passed **10 of 10** scenarios. The build emits a non-blocking Rollup chunk-size warning.
 
 ## Deployment Notes
 
-`make-worker-deploy-request.mjs` deploys the isolated API Worker. `publish-frontend-assets.mjs` copies campaign assets to deterministic `site/v2/*` object keys in the new R2 bucket and updates v2 catalogue image URLs. `make-web-worker-deploy-request.mjs` packages the production frontend into the separate Cloudflare frontend Worker. See [deployment verification](docs/deployment-verification.md) for the deployed route and resource mapping.
+`make-worker-deploy-request.mjs` deploys the isolated API Worker. `publish-frontend-assets.mjs` copies campaign assets to deterministic `site/v2/*` object keys in the new R2 bucket and updates v2 catalogue image URLs. `make-web-worker-deploy-request.mjs` packages the production frontend into the separate Cloudflare frontend Worker. The frontend’s latest accepted isolated Worker deployment is recorded in [deployment verification](docs/deployment-verification.md). See [v2 secret boundaries](docs/v2-secret-boundaries.md) and [release-gate evidence](docs/release-gate-evidence.md) for redacted operational details.

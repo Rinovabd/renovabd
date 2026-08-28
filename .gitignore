@@ -114,5 +114,9 @@ client/public/__manus__/version.json
 
 # Rinovabd v2 local deployment artifacts (generated outside version control)
 cloudflare-worker/scripts/set-admin-secret-request.json
+cloudflare-worker/scripts/deploy-v2-worker-request.json
 cloudflare-worker/scripts/deploy-v2-web-request.json
+cloudflare-worker/scripts/deploy-v2-worker-compact-request.json
+playwright-report/
+test-results/
 cloudflare-worker/reports/

@@ -77,3 +77,6 @@ The wordmark uses a custom-feeling serif lockup with a deliberately extended **R
 - Product archive views must never resolve into a plain centered ecommerce grid; every shelf page carries a visible ribbon rail, asymmetric break, or editorial band.
 - The standalone Rinova mark is a folded ribbon-loop symbol with a visible aperture; the wordmark includes a deliberately tailored serif detail.
 - Repeated imagery is only used when deliberately re-cropped or re-treated; each major section introduces a distinct campaign image, still life, or ribbon composition within the same pink/parchment world.
+- Every public commerce route carries a visibly art-directed merchandising field before product browsing: a ribbon rail, asymmetric shelf, editorial band, or cut-corner panel.
+- Utility moments, including account and Studio access, use the same printed-physical vocabulary as the storefront through pink label tabs, graphite rules, and cut-corner panels.
+- Rinova Pink carries navigation and status: it marks category index rails, selected controls, secure entry cues, launch surfaces, and other high-intent commerce signals.

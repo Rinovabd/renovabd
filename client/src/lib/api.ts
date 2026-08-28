@@ -1,46 +1,32 @@
-/** Ribbon Modernism: API calls are explicit, small, and restricted to the dedicated Rinovabd v2 origin. */
+/** Ribbon Modernism API client: all commerce and Studio requests target the isolated Cloudflare v2 origin, while credentials remain outside the client bundle. */
 import type { Product } from "./catalog";
-
 export const API_BASE = (import.meta.env.VITE_RINOVABD_API_URL || "https://api-v2.rinovabd.com").replace(/\/$/, "");
-
 type ApiErrorShape = { error?: { message?: string } };
-
-async function request<T>(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } });
-  if (!response.ok) {
-    const details = await response.json().catch(() => ({})) as ApiErrorShape;
-    throw new Error(details.error?.message || `Request failed with ${response.status}.`);
-  }
-  return response.json() as Promise<T>;
-}
-
-export async function fetchProducts() {
-  const result = await request<{ products: Product[] }>("/api/products");
-  return result.products;
-}
-
-export async function adminLogin(token: string) {
-  return request<{ session: string; expiresInSeconds: number }>("/api/admin/login", { method: "POST", body: JSON.stringify({ token }) });
-}
-
+export type Customer = { id: string; name: string; email: string };
+export type Category = { id: string; name: string; slug: string; description: string; status?: "live" | "draft"; sortOrder: number; productCount?: number };
+export type OrderItem = { id: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
+export type Order = { id: string; invoiceNumber: string; status: string; paymentMethod: string; subtotal: number; delivery: number; total: number; createdAt: string; items: OrderItem[]; tracking: { status: string; note: string; createdAt: string }[] };
+export type AdminOrder = { id: string; status: string; total: number; paymentMethod: string; createdAt: string; customerName: string; email: string };
+export type AdminOverview = { inventory: { products: number; units: number; low_stock: number }; orders: { orders: number; revenue: number; new_orders: number }; media: { assets: number }; categories: { categories: number } };
+async function request<T>(path: string, options: RequestInit = {}) { const response = await fetch(`${API_BASE}${path}`, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } }); if (!response.ok) { const details = await response.json().catch(() => ({})) as ApiErrorShape; throw new Error(details.error?.message || `Request failed with ${response.status}.`); } return response.json() as Promise<T>; }
+export const fetchProducts = async () => (await request<{ products: Product[] }>("/api/products")).products;
+export const fetchCategories = async () => (await request<{ categories: Category[] }>("/api/categories")).categories;
+export const fetchCategory = (slug: string) => request<{ category: Category; products: Product[] }>(`/api/categories/${encodeURIComponent(slug)}`);
+export const customerLogin = (email: string, password: string) => request<{ session: string; user: Customer }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+export const customerRegister = (name: string, email: string, password: string) => request<{ session: string; user: Customer }>("/api/auth/register", { method: "POST", body: JSON.stringify({ name, email, password }) });
+export const customerMe = (session: string) => request<{ user: Customer }>("/api/auth/me", { headers: { "x-user-session": session } });
+export const customerLogout = (session: string) => request<{ ok: true }>("/api/auth/logout", { method: "POST", headers: { "x-user-session": session } });
+export const createOrder = (input: { customerName: string; email: string; phone: string; deliveryAddress: string; items: { id: string; quantity: number }[]; paymentMethod: "cod" | "mobile-payment" }) => { const userSession = window.sessionStorage.getItem("rinovabd-v2-customer-session") || ""; return request<{ order: Order; invoice: { number: string; url: string }; tracking: { url: string } }>("/api/orders", { method: "POST", headers: userSession ? { "x-user-session": userSession } : {}, body: JSON.stringify(input) }); };
+export const fetchOrder = (orderId: string, access: string) => request<{ order: Order }>(`/api/orders/${encodeURIComponent(orderId)}?access=${encodeURIComponent(access)}`);
+export const fetchInvoice = (orderId: string, access: string) => request<{ invoice: { number: string; issuedAt: string; order: Order } }>(`/api/invoices/${encodeURIComponent(orderId)}?access=${encodeURIComponent(access)}`);
+export const adminLogin = (usernameOrToken: string, password?: string) => request<{ session: string; expiresInSeconds: number }>("/api/admin/login", { method: "POST", body: JSON.stringify(password === undefined ? { token: usernameOrToken } : { username: usernameOrToken, password }) });
 const sessionHeaders = (session: string) => ({ "x-admin-session": session });
-
-export async function fetchAdminProducts(session: string) {
-  const result = await request<{ products: Product[] }>("/api/admin/products", { headers: sessionHeaders(session) });
-  return result.products;
-}
-
-export async function saveAdminProduct(session: string, product: Product, existing: boolean) {
-  const path = existing ? `/api/admin/products/${encodeURIComponent(product.id)}` : "/api/admin/products";
-  const result = await request<{ product: Product }>(path, { method: existing ? "PATCH" : "POST", headers: sessionHeaders(session), body: JSON.stringify(product) });
-  return result.product;
-}
-
-export async function uploadMedia(session: string, file: File) {
-  const response = await fetch(`${API_BASE}/api/media`, { method: "POST", headers: { "x-admin-session": session, "content-type": file.type, "x-filename": file.name }, body: file });
-  if (!response.ok) {
-    const details = await response.json().catch(() => ({})) as ApiErrorShape;
-    throw new Error(details.error?.message || `Image upload failed with ${response.status}.`);
-  }
-  return response.json() as Promise<{ asset: { id: string; key: string; url: string; type: string; size: number } }>;
-}
+export const adminLogout = (session: string) => request<{ ok: true }>("/api/admin/logout", { method: "POST", headers: sessionHeaders(session) });
+export const fetchAdminOverview = (session: string) => request<{ overview: AdminOverview }>("/api/admin/overview", { headers: sessionHeaders(session) });
+export const fetchAdminProducts = async (session: string) => (await request<{ products: Product[] }>("/api/admin/products", { headers: sessionHeaders(session) })).products;
+export const saveAdminProduct = async (session: string, product: Product, existing: boolean) => (await request<{ product: Product }>(existing ? `/api/admin/products/${encodeURIComponent(product.id)}` : "/api/admin/products", { method: existing ? "PATCH" : "POST", headers: sessionHeaders(session), body: JSON.stringify(product) })).product;
+export const fetchAdminCategories = async (session: string) => (await request<{ categories: Category[] }>("/api/admin/categories", { headers: sessionHeaders(session) })).categories;
+export const saveAdminCategory = (session: string, category: Category, existing: boolean) => request<{ category: Category }>(existing ? `/api/admin/categories/${encodeURIComponent(category.id)}` : "/api/admin/categories", { method: existing ? "PATCH" : "POST", headers: sessionHeaders(session), body: JSON.stringify(category) });
+export const fetchAdminOrders = async (session: string) => (await request<{ orders: AdminOrder[] }>("/api/admin/orders", { headers: sessionHeaders(session) })).orders;
+export const updateAdminOrder = (session: string, orderId: string, status: string, note: string) => request<{ status: string }>(`/api/admin/orders/${encodeURIComponent(orderId)}`, { method: "PATCH", headers: sessionHeaders(session), body: JSON.stringify({ status, note }) });
+export const uploadMedia = async (session: string, file: File) => { const response = await fetch(`${API_BASE}/api/media`, { method: "POST", headers: { "x-admin-session": session, "content-type": file.type, "x-filename": file.name }, body: file }); if (!response.ok) { const details = await response.json().catch(() => ({})) as ApiErrorShape; throw new Error(details.error?.message || `Image upload failed with ${response.status}.`); } return response.json() as Promise<{ asset: { id: string; key: string; url: string; type: string; size: number } }>; };

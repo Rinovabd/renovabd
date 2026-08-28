@@ -13,6 +13,11 @@ export type Product = {
   stock: number;
   status: ProductStatus;
   description: string;
+  sku?: string;
+  barcode?: string;
+  slug?: string;
+  featured?: boolean;
+  lowStockThreshold?: number;
 };
 
 export const productSeed: Product[] = [

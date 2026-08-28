@@ -1,0 +1,9 @@
+/** Ribbon Modernism category detail: an editorial shelf that pairs the real category API with compact commerce cues. */
+import { ArrowLeft } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useRoute } from "wouter";
+import { ProductCard } from "@/components/ProductCard";
+import { StoreHeader } from "@/components/StoreHeader";
+import { fetchCategory, type Category } from "@/lib/api";
+import type { Product } from "@/lib/catalog";
+export default function CategoryDetail() { const [, params] = useRoute("/categories/:slug"); const [category, setCategory] = useState<Category | null>(null); const [products, setProducts] = useState<Product[]>([]); const [error, setError] = useState(""); useEffect(() => { if (!params?.slug) return; fetchCategory(params.slug).then((data) => { setCategory(data.category); setProducts(data.products); }).catch(() => setError("This shelf is not available right now.")); }, [params?.slug]); return <div className="site-shell commerce-page"><StoreHeader /><main className="category-detail"><a className="back-link" href="/categories"><ArrowLeft size={16} />All categories</a>{error ? <p className="form-error">{error}</p> : !category ? <p>Opening the shelf…</p> : <><div className="category-shelf-rail"><span>Rinovabd shelf</span><i /><span>{category.productCount} pieces</span><i /><span>Considered in Bangladesh</span></div><header><span className="eyebrow">Rinovabd category</span><h1>{category.name}<br /><em>considered.</em></h1><p>{category.description}</p></header><section className="product-grid product-grid--shop">{products.length ? products.map((product, index) => <ProductCard key={product.id} product={product} featured={index === 1} />) : <div className="empty-commerce"><p>This shelf is being prepared for its next edit.</p><a className="button button--pink" href="/shop">Browse all products</a></div>}</section></>}</main></div>; }
