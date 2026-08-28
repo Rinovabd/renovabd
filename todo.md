@@ -38,6 +38,6 @@
 - [x] Implement the customer assistant with direct-answer/why/next-step formatting and Worker-verified product cards.
 - [x] Implement the protected staff assistant with grounded read-only operations and explicit approval boundaries for mutations.
 - [x] Add deterministic Worker unit/security tests and serialized desktop/mobile browser coverage for both assistant channels, including failure and privacy paths.
-- [ ] Deploy only the isolated v2 assistant revision, verify live health and protected boundaries, update README and release evidence, push source-only GitHub changes, and save a checkpoint.
+- [x] Deploy only the isolated v2 assistant revision, verify live health and protected boundaries, update README and release evidence, push source-only GitHub changes, and save a checkpoint.
 
 > Assistant implementation must never expose credentials, raw service-account material, customer private data, payment details, or unapproved operational actions.
