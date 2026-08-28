@@ -22,3 +22,11 @@
 - [x] Gate 4: Run strictly single-worker browser automation for customer failure, categories, mocked checkout/invoice, Studio entry/product operations/logout at desktop and mobile sizes; capture screenshots.
 - [x] Gate 5: Run the redacted live Cloudflare API smoke suite and public browser checks after deployment; fix every failed check before proceeding.
 - [ ] Save the final web project checkpoint and prepare the deployment/access handoff.
+
+## GTM, GA4, and Technical SEO
+
+- [x] Add the supplied public GTM container identifier as the sole client-side GA4 installation path; do not add a duplicate direct GA4 tag.
+- [x] Add privacy-conscious commerce event pushes to the GTM data layer, with no customer identifiers, addresses, credentials, or payment details.
+- [x] Add canonical metadata, social metadata, crawl directives, and public JSON-LD for the storefront only; customer, checkout, invoice, tracking, and Studio routes remain noindex.
+- [x] Generate `sitemap.xml` and `robots.txt` at build time from the explicit public route list; exclude private and parameterized routes.
+- [x] Run typecheck, production build, security audit, strict sequential Playwright tests, public sitemap/robots checks, and live Cloudflare browser verification before deployment.

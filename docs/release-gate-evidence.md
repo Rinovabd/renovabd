@@ -12,3 +12,16 @@
 | `https://shop-v2.rinovabd.com/account` (post-refinement) | Passed | The live account screen retained its secure labelled sign-in controls and rendered the account desk rail and account-counter ticket; no credentials or customer data were submitted. |
 
 > These checks used only public browser rendering. No customer account, administrator credential, session token, service-account credential, or legacy Cloudflare resource was accessed or recorded.
+
+## GTM, GA4, and Technical SEO Release Gate
+
+| Check | Result | Verified outcome |
+| --- | --- | --- |
+| GTM-first storefront code | Passed locally | The build contains one GTM bootstrap, denied-by-default consent, and no direct `gtag.js` installation. The serialized browser suite verifies anonymous add-to-cart, bag, checkout, and purchase data-layer events after opt-in. |
+| Public metadata and noindex boundary | Passed locally | The desktop/mobile browser suite verifies a canonical category URL with `CollectionPage` JSON-LD and `noindex, nofollow, noarchive` on the account route. |
+| Sitemap | Passed live | `https://shop-v2.rinovabd.com/sitemap.xml` served seven canonical public URLs: home, shop, category index, and four current category shelves. No Studio, account, cart, checkout, invoice, or tracking route appeared. |
+| Robots | Passed live | `https://shop-v2.rinovabd.com/robots.txt` allows public crawling, disallows the six private route patterns, and declares the canonical sitemap URL. |
+
+The SEO build verifier passed with seven public URLs and six excluded private paths. The final serialized Playwright run passed 12 of 12 desktop/mobile scenarios. No real customer, invoice, order, payment, or Studio credential was submitted during this verification.
+
+The deployed homepage inspection confirmed one GTM bootstrap, no duplicate direct GA tag, the canonical homepage URL, indexable public crawl directive, and Organization structured data. Publishing a Google tag in the authorised GTM workspace remains a separate account-side action; this release does not access or publish that workspace.
